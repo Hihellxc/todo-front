@@ -1,13 +1,39 @@
+/* TaskFlow — blue & pink theme */
+:root {
+  --sky: #38bdf8;
+  --pink: #f472b6;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  min-height: 100vh;
+  font-family: 'Nunito', 'Noto Sans Thai', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, 'Helvetica Neue', sans-serif;
+  color: #334155;
+  background: linear-gradient(135deg, #e0f2fe 0%, #f5f3ff 50%, #fce7f3 100%);
+  background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Blue → pink gradient helpers */
+.btn-grad {
+  background-image: linear-gradient(135deg, var(--sky), var(--pink));
+}
+.btn-grad:not(:disabled):hover {
+  filter: brightness(1.06);
+}
+.text-grad {
+  background-image: linear-gradient(135deg, #0ea5e9, #ec4899);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }

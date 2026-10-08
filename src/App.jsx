@@ -1,12 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
 
-import { 
-  CheckCircle2, Circle, Trash2, Plus, Clock, Settings, RefreshCw, 
-  AlertCircle, Sparkles, Server, Check, X, Search, Edit2, 
-  ArrowUpDown, LogOut, User as UserIcon, Lock, Mail, ArrowRight
-} from 'lucide-react';
-
-
 const getInitialApiUrl = () => {
   // Check for Vite environment variables first
   if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) {
@@ -20,6 +13,20 @@ const getInitialApiUrl = () => {
   return 'http://localhost:5000';
 };
 
+const FILTERS = [
+  { key: 'all', label: 'All', emoji: '📋' },
+  { key: 'active', label: 'To do', emoji: '⏳' },
+  { key: 'completed', label: 'Done', emoji: '✅' },
+];
+
+// Shared style snippets (blue & pink theme)
+const inputClass =
+  'w-full rounded-2xl border-2 border-sky-100 bg-white px-4 py-3 text-base text-slate-800 placeholder-slate-400 transition focus:border-sky-400 focus:outline-none focus:ring-4 focus:ring-sky-100';
+const iconBtnClass =
+  'flex h-10 w-10 items-center justify-center rounded-xl border border-sky-100 bg-white text-lg shadow-sm transition hover:border-pink-200 hover:bg-pink-50 focus:outline-none focus:ring-4 focus:ring-pink-100';
+const modalBackdropClass =
+  'fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm';
+
 export default function App() {
   // Auth State
   const [token, setToken] = useState(localStorage.getItem('taskflow_token') || null);
@@ -27,14 +34,15 @@ export default function App() {
   const [isAuthMode, setIsAuthMode] = useState('login'); // 'login' | 'register'
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState('');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
   // Todo State
   const [todos, setTodos] = useState([]);
   const [newTodoText, setNewTodoText] = useState('');
-  const [filter, setFilter] = useState('all'); 
-  const [sortBy, setSortBy] = useState('newest'); 
+  const [filter, setFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('newest');
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editingText, setEditingText] = useState('');
@@ -45,6 +53,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [pendingApiUrl, setPendingApiUrl] = useState(getInitialApiUrl);
   const [isConnected, setIsConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const getHeaders = () => ({
@@ -52,13 +61,18 @@ export default function App() {
     ...(token ? { 'Authorization': `Bearer ${token}` } : {})
   });
 
+  const openSettings = () => {
+    setPendingApiUrl(apiUrl);
+    setIsSettingsOpen(true);
+  };
+
   const handleAuth = async (e) => {
     e.preventDefault();
     setAuthError('');
     setIsAuthLoading(true);
 
     const endpoint = isAuthMode === 'login' ? '/api/auth/login' : '/api/auth/register';
-    
+
     try {
       const response = await fetch(`${apiUrl.replace(/\/$/, '')}${endpoint}`, {
         method: 'POST',
@@ -67,7 +81,7 @@ export default function App() {
       });
 
       const data = await response.json();
-      
+
       if (!response.ok) {
         throw new Error(data.error || 'Authentication failed');
       }
@@ -79,8 +93,13 @@ export default function App() {
       setAuthPassword('');
       setAuthEmail('');
       setIsConnected(true);
+      setConnectionError(false);
     } catch (err) {
-      setAuthError(err.message);
+      setAuthError(
+        err instanceof TypeError
+          ? "Can't reach the server. Please check the Backend URL in ⚙️ Settings."
+          : err.message
+      );
     } finally {
       setIsAuthLoading(false);
     }
@@ -113,9 +132,11 @@ export default function App() {
       const data = await response.json();
       setTodos(data);
       setIsConnected(true);
+      setConnectionError(false);
     } catch (err) {
       console.warn('Backend issue:', err.message);
       setIsConnected(false);
+      setConnectionError(true);
     } finally {
       setIsLoading(false);
     }
@@ -144,7 +165,7 @@ export default function App() {
 
       if (response.status === 401) return handleLogout();
       if (!response.ok) throw new Error('Failed to create on server');
-      
+
       const savedTodo = await response.json();
       setTodos((prev) => prev.map((t) => (t._id === tempId ? savedTodo : t)));
     } catch (err) {
@@ -239,204 +260,344 @@ export default function App() {
     });
   }, [todos, filter, searchQuery, sortBy]);
 
+  const stats = useMemo(() => {
+    const total = todos.length;
+    const done = todos.filter((t) => t.completed).length;
+    const pending = total - done;
+    const percent = total ? Math.round((done / total) * 100) : 0;
+    return { total, done, pending, percent };
+  }, [todos]);
+
+  const counts = { all: stats.total, active: stats.pending, completed: stats.done };
+
+  const greetingName = currentUser ? currentUser.split('@')[0] : '';
+  const greetingText =
+    stats.total === 0
+      ? 'Ready to plan your day? Add your first task below 👇'
+      : stats.pending === 0
+        ? 'All tasks done. Great job! 🎉'
+        : `You have ${stats.pending} task${stats.pending > 1 ? 's' : ''} left to do 💪`;
+
+  /* ---------- Shared: API settings modal ---------- */
+  const renderSettingsModal = () =>
+    isSettingsOpen && (
+      <div className={modalBackdropClass} onClick={() => setIsSettingsOpen(false)}>
+        <div
+          className="relative w-full max-w-md rounded-3xl border border-sky-100 bg-white p-6 shadow-2xl shadow-sky-200/60"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => setIsSettingsOpen(false)}
+            aria-label="Close"
+            className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition hover:bg-pink-50 hover:text-pink-500"
+          >
+            ✖️
+          </button>
+          <h2 className="text-lg font-extrabold text-slate-800">⚙️ Settings</h2>
+          <div className="mt-5 flex flex-col gap-2">
+            <label htmlFor="api-url" className="text-sm font-bold text-slate-600">🔗 Backend URL</label>
+            <input
+              id="api-url"
+              type="text"
+              value={pendingApiUrl}
+              onChange={(e) => setPendingApiUrl(e.target.value)}
+              className={`${inputClass} font-mono !text-sm`}
+            />
+            <p className="text-xs text-slate-500">Where your TaskFlow API is running, e.g. http://localhost:5000</p>
+          </div>
+          <div className="mt-6 flex justify-end gap-2.5">
+            <button
+              onClick={() => setIsSettingsOpen(false)}
+              className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-500 transition hover:bg-slate-100"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => { setApiUrl(pendingApiUrl); setIsSettingsOpen(false); }}
+              className="btn-grad rounded-xl px-5 py-2.5 text-sm font-bold text-white shadow-md shadow-pink-200 transition active:scale-95"
+            >
+              💾 Save
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+
+  /* ---------- Login / Register ---------- */
   if (!token) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
-        
-        {/* Settings button to adjust backend URL if needed */}
+      <div className="relative flex min-h-screen flex-col items-center justify-center p-4 selection:bg-pink-200">
         <button
-          onClick={() => setIsSettingsOpen(true)}
-          title="API Configuration"
-          className="absolute top-6 right-6 p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white transition"
+          onClick={openSettings}
+          title="Settings"
+          aria-label="Settings"
+          className={`${iconBtnClass} absolute right-5 top-5`}
         >
-          <Settings className="w-5 h-5" />
+          ⚙️
         </button>
 
-        <div className="w-full max-w-sm bg-slate-900/80 border border-slate-800 p-8 rounded-3xl shadow-2xl backdrop-blur-sm">
-          <div className="flex justify-center mb-6">
-            <div className="p-3.5 bg-gradient-to-tr from-indigo-600 to-violet-500 rounded-2xl shadow-lg shadow-indigo-500/20">
-              <Sparkles className="w-8 h-8 text-white" />
+        <div className="w-full max-w-sm rounded-3xl border border-white bg-white/80 p-8 shadow-2xl shadow-sky-200/60 backdrop-blur">
+          <div className="mb-5 flex justify-center">
+            <div className="btn-grad flex h-16 w-16 items-center justify-center rounded-2xl text-3xl shadow-lg shadow-pink-200">
+              📝
             </div>
           </div>
-          <h1 className="text-2xl font-bold text-center text-white mb-2">
-            TaskFlow
-          </h1>
-          <p className="text-center text-slate-400 text-sm mb-8">
-            {isAuthMode === 'login' ? 'Sign in to sync your tasks securely.' : 'Create an account to get started.'}
+          <h1 className="text-grad text-center text-3xl font-extrabold">TaskFlow</h1>
+          <p className="mb-7 mt-2 text-center text-sm text-slate-500">
+            {isAuthMode === 'login'
+              ? '👋 Welcome back! Sign in to see your tasks.'
+              : '✨ Create an account to get started.'}
           </p>
 
           <form onSubmit={handleAuth} className="flex flex-col gap-4">
             {authError && (
-              <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs p-3 rounded-xl flex gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{authError}</span>
+              <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-600">
+                ⚠️ {authError}
               </div>
             )}
-            <div className="relative">
-              <Mail className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="auth-email" className="text-sm font-bold text-slate-600">📧 Email</label>
               <input
+                id="auth-email"
                 type="email"
                 required
+                autoComplete="email"
                 value={authEmail}
                 onChange={(e) => setAuthEmail(e.target.value)}
-                placeholder="Email address"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/70"
+                placeholder="you@example.com"
+                className={inputClass}
               />
             </div>
-            <div className="relative">
-              <Lock className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input
-                type="password"
-                required
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-                placeholder="Password"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/70"
-              />
+
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="auth-password" className="text-sm font-bold text-slate-600">🔒 Password</label>
+              <div className="relative">
+                <input
+                  id="auth-password"
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  autoComplete={isAuthMode === 'login' ? 'current-password' : 'new-password'}
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  placeholder="Your password"
+                  className={`${inputClass} pr-12`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl text-lg transition hover:bg-sky-50"
+                >
+                  {showPassword ? '🙈' : '👁️'}
+                </button>
+              </div>
             </div>
+
             <button
               type="submit"
               disabled={isAuthLoading}
-              className="mt-2 w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-3 text-sm font-medium transition shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 disabled:opacity-50"
+              className="btn-grad mt-2 w-full rounded-2xl py-3.5 text-base font-extrabold text-white shadow-lg shadow-pink-200 transition active:scale-[0.98] disabled:opacity-60"
             >
-              {isAuthLoading ? 'Please wait...' : (isAuthMode === 'login' ? 'Sign In' : 'Create Account')}
-              {!isAuthLoading && <ArrowRight className="w-4 h-4" />}
+              {isAuthLoading
+                ? '⏳ Please wait...'
+                : isAuthMode === 'login'
+                  ? 'Sign In 🚀'
+                  : 'Create Account 🎉'}
             </button>
           </form>
 
           <div className="mt-6 text-center text-sm">
             <span className="text-slate-500">
-              {isAuthMode === 'login' ? "Don't have an account? " : "Already have an account? "}
+              {isAuthMode === 'login' ? "Don't have an account? " : 'Already have an account? '}
             </span>
             <button
-              onClick={() => setIsAuthMode(isAuthMode === 'login' ? 'register' : 'login')}
-              className="text-indigo-400 hover:text-indigo-300 font-medium transition"
+              onClick={() => { setIsAuthMode(isAuthMode === 'login' ? 'register' : 'login'); setAuthError(''); }}
+              className="font-bold text-sky-600 underline-offset-2 transition hover:text-pink-500 hover:underline"
             >
               {isAuthMode === 'login' ? 'Sign up' : 'Log in'}
             </button>
           </div>
         </div>
 
-        {/* Re-use Settings Modal Logic */}
-        {isSettingsOpen && (
-          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
-              <button onClick={() => setIsSettingsOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-200">
-                <X className="w-5 h-5" />
-              </button>
-              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                <Server className="w-5 h-5 text-indigo-400" /> API Environment Settings
-              </h2>
-              <div className="mt-4 flex flex-col gap-2">
-                <label className="text-xs font-medium text-slate-300">Backend URL</label>
-                <input
-                  type="text"
-                  value={pendingApiUrl}
-                  onChange={(e) => setPendingApiUrl(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
-                />
-              </div>
-              <div className="mt-6 flex justify-end gap-2.5">
-                <button onClick={() => setIsSettingsOpen(false)} className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:bg-slate-800">Cancel</button>
-                <button onClick={() => { setApiUrl(pendingApiUrl); setIsSettingsOpen(false); }} className="px-4 py-2 rounded-xl text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-medium">Save</button>
-              </div>
-            </div>
-          </div>
-        )}
+        {renderSettingsModal()}
       </div>
     );
   }
 
+  /* ---------- Main app ---------- */
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center py-8 px-4 sm:px-6 selection:bg-indigo-500 selection:text-white">
-      <div className="w-full max-w-2xl flex flex-col gap-6">
-        
-        <header className="flex flex-col gap-4 border-b border-slate-800 pb-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-gradient-to-tr from-indigo-600 to-violet-500 rounded-xl shadow-lg shadow-indigo-500/20">
-                <Sparkles className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">TaskFlow</h1>
-                <p className="text-xs text-slate-400">Secured with JWT</p>
-              </div>
-            </div>
+    <div className="flex min-h-screen flex-col items-center px-4 py-6 selection:bg-pink-200 sm:px-6 sm:py-10">
+      <div className="flex w-full max-w-2xl flex-col gap-5">
 
-            <div className="flex items-center gap-2">
-              <button onClick={() => fetchTodos(apiUrl)} title="Refresh" className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white transition">
-                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-indigo-400' : ''}`} />
-              </button>
-              <button onClick={() => setIsSettingsOpen(true)} title="Settings" className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white transition">
-                <Settings className="w-4 h-4" />
-              </button>
+        {/* Header */}
+        <header className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="btn-grad flex h-12 w-12 items-center justify-center rounded-2xl text-2xl shadow-lg shadow-pink-200">
+              📝
             </div>
+            <h1 className="text-grad text-2xl font-extrabold tracking-tight sm:text-3xl">TaskFlow</h1>
           </div>
-          
-          <div className="flex items-center justify-between text-xs px-3.5 py-2.5 rounded-lg border bg-slate-900/60 backdrop-blur border-slate-800/80">
-            <div className="flex items-center gap-2 text-slate-300">
-              <UserIcon className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Signed in as <strong className="font-medium">{currentUser}</strong></span>
-            </div>
-            <button onClick={handleLogout} className="flex items-center gap-1.5 text-rose-400 hover:text-rose-300 transition">
-              <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Logout</span>
+
+          <div className="flex items-center gap-2">
+            <button onClick={() => fetchTodos(apiUrl)} title="Refresh" aria-label="Refresh" className={iconBtnClass}>
+              <span className={isLoading ? 'inline-block animate-spin' : ''}>🔄</span>
+            </button>
+            <button onClick={openSettings} title="Settings" aria-label="Settings" className={iconBtnClass}>
+              ⚙️
+            </button>
+            <button
+              onClick={handleLogout}
+              title="Log out"
+              className="flex h-10 items-center gap-1.5 rounded-xl border border-pink-200 bg-pink-50 px-3 text-sm font-bold text-pink-600 shadow-sm transition hover:bg-pink-100 focus:outline-none focus:ring-4 focus:ring-pink-100"
+            >
+              <span aria-hidden="true">🚪</span>
+              <span className="hidden sm:inline">Log out</span>
             </button>
           </div>
         </header>
 
-        <form onSubmit={handleAddTodo} className="relative group">
-          <div className="flex items-center gap-2 p-1.5 bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl shadow-black/40 focus-within:border-indigo-500/80 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all">
+        {/* Connection problem */}
+        {connectionError && (
+          <div role="alert" className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-800">
+            <span aria-hidden="true">⚠️</span>
+            <span>
+              Can't reach the server. Check the Backend URL in ⚙️ Settings, then tap 🔄 to try again.
+            </span>
+          </div>
+        )}
+
+        {/* Summary card */}
+        <section className="rounded-3xl border border-white bg-white/80 p-5 shadow-xl shadow-sky-200/50 backdrop-blur">
+          <h2 className="text-xl font-extrabold text-slate-800">
+            Hi, {greetingName} 👋
+          </h2>
+          <p className="mt-0.5 text-sm text-slate-500">{greetingText}</p>
+          <p className="mt-0.5 truncate text-xs text-slate-400">👤 {currentUser}</p>
+
+          <div className="mt-4 grid grid-cols-3 gap-2.5 text-center">
+            <div className="rounded-2xl bg-sky-50 px-2 py-3">
+              <div className="text-2xl font-extrabold text-sky-600">{stats.total}</div>
+              <div className="text-xs font-semibold text-sky-700/70">📋 Total</div>
+            </div>
+            <div className="rounded-2xl bg-violet-50 px-2 py-3">
+              <div className="text-2xl font-extrabold text-violet-500">{stats.pending}</div>
+              <div className="text-xs font-semibold text-violet-600/70">⏳ To do</div>
+            </div>
+            <div className="rounded-2xl bg-pink-50 px-2 py-3">
+              <div className="text-2xl font-extrabold text-pink-500">{stats.done}</div>
+              <div className="text-xs font-semibold text-pink-600/70">✅ Done</div>
+            </div>
+          </div>
+
+          {stats.total > 0 && (
+            <div className="mt-4">
+              <div className="mb-1.5 flex justify-between text-xs font-semibold text-slate-500">
+                <span>🎯 Progress</span>
+                <span>{stats.percent}%</span>
+              </div>
+              <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="btn-grad h-full rounded-full transition-all duration-500"
+                  style={{ width: `${stats.percent}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* Add task */}
+        <form onSubmit={handleAddTodo}>
+          <div className="flex items-center gap-2 rounded-3xl border-2 border-white bg-white p-2 shadow-xl shadow-pink-200/40 transition focus-within:border-sky-300 focus-within:ring-4 focus-within:ring-sky-100">
             <input
               type="text"
               value={newTodoText}
               onChange={(e) => setNewTodoText(e.target.value)}
-              placeholder="What needs to be done today?..."
-              className="flex-1 bg-transparent px-4 py-3 text-slate-100 placeholder-slate-500 text-sm focus:outline-none"
+              placeholder="✏️ What do you want to do today?"
+              aria-label="New task"
+              className="min-w-0 flex-1 bg-transparent px-3 py-2.5 text-base text-slate-800 placeholder-slate-400 focus:outline-none"
             />
-            <button type="submit" disabled={!newTodoText.trim()} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm flex items-center gap-2 shadow-md shadow-indigo-600/30 transition disabled:opacity-40 active:scale-95">
-              <Plus className="w-4 h-4" /> <span>Add</span>
+            <button
+              type="submit"
+              disabled={!newTodoText.trim()}
+              className="btn-grad flex items-center gap-1.5 rounded-2xl px-5 py-3 text-sm font-extrabold text-white shadow-md shadow-pink-200 transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <span aria-hidden="true">➕</span> Add
             </button>
           </div>
         </form>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
-          <div className="flex items-center bg-slate-900 border border-slate-800 p-1 rounded-xl text-xs">
-            {['all', 'active', 'completed'].map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-3 py-1.5 rounded-lg transition font-medium capitalize ${filter === f ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                {f}
-              </button>
-            ))}
-          </div>
+        {/* Filters, sort & search (only when there is something to filter) */}
+        {todos.length > 0 && (
+          <div className="flex flex-col gap-3">
+            <div className="flex rounded-2xl border border-sky-100 bg-white p-1 shadow-sm">
+              {FILTERS.map(({ key, label, emoji }) => (
+                <button
+                  key={key}
+                  onClick={() => setFilter(key)}
+                  className={`flex-1 rounded-xl px-2 py-2 text-sm font-bold transition ${
+                    filter === key
+                      ? 'btn-grad text-white shadow-md shadow-pink-200'
+                      : 'text-slate-500 hover:bg-sky-50 hover:text-sky-600'
+                  }`}
+                >
+                  <span aria-hidden="true">{emoji}</span> {label}{' '}
+                  <span className={filter === key ? 'text-white/80' : 'text-slate-400'}>({counts[key]})</span>
+                </button>
+              ))}
+            </div>
 
-          <div className="flex items-center gap-2 flex-1 sm:justify-end">
-            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300 hover:border-slate-700">
-              <ArrowUpDown className="w-3.5 h-3.5 text-indigo-400" />
-              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="bg-transparent text-slate-200 focus:outline-none cursor-pointer">
-                <option value="newest" className="bg-slate-900">Newest first</option>
-                <option value="oldest" className="bg-slate-900">Oldest first</option>
-                <option value="az" className="bg-slate-900">A &rarr; Z</option>
-                <option value="za" className="bg-slate-900">Z &rarr; A</option>
-                <option value="status" className="bg-slate-900">Pending first</option>
+            <div className="flex flex-col gap-2.5 sm:flex-row">
+              <div className="relative flex-1">
+                <span aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm">🔍</span>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search tasks..."
+                  aria-label="Search tasks"
+                  className="w-full rounded-2xl border border-sky-100 bg-white py-2.5 pl-10 pr-3 text-sm text-slate-700 placeholder-slate-400 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-4 focus:ring-sky-100"
+                />
+              </div>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                aria-label="Sort tasks"
+                className="cursor-pointer rounded-2xl border border-sky-100 bg-white px-3 py-2.5 text-sm font-semibold text-slate-600 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-4 focus:ring-sky-100"
+              >
+                <option value="newest">🆕 Newest first</option>
+                <option value="oldest">🕰️ Oldest first</option>
+                <option value="status">⏳ To do first</option>
+                <option value="az">🔤 A → Z</option>
+                <option value="za">🔡 Z → A</option>
               </select>
             </div>
-            <div className="relative flex-1 max-w-[210px]">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search..." className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500/70" />
-            </div>
           </div>
-        </div>
+        )}
 
-        <div className="flex flex-col gap-2.5">
+        {/* Task list */}
+        <div className="flex flex-col gap-3">
           {filteredTodos.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 px-4 border border-dashed border-slate-800/80 rounded-2xl bg-slate-900/30 text-center">
-              <CheckCircle2 className="w-7 h-7 text-slate-500 mb-3" />
-              <h3 className="text-sm font-medium text-slate-300">No tasks found</h3>
-              <p className="text-xs text-slate-500 mt-1 max-w-xs">Nothing to see here right now.</p>
+            <div className="flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-sky-200 bg-white/60 px-4 py-14 text-center">
+              {isLoading && todos.length === 0 ? (
+                <>
+                  <div className="mb-2 text-4xl">⏳</div>
+                  <h3 className="text-base font-extrabold text-slate-700">Loading your tasks...</h3>
+                </>
+              ) : todos.length === 0 ? (
+                <>
+                  <div className="mb-2 text-5xl">🌈</div>
+                  <h3 className="text-base font-extrabold text-slate-700">No tasks yet</h3>
+                  <p className="mt-1 max-w-xs text-sm text-slate-500">Type something in the box above and press Add ☝️</p>
+                </>
+              ) : (
+                <>
+                  <div className="mb-2 text-5xl">🔍</div>
+                  <h3 className="text-base font-extrabold text-slate-700">Nothing matches</h3>
+                  <p className="mt-1 max-w-xs text-sm text-slate-500">Try another filter or a different search word.</p>
+                </>
+              )}
             </div>
           ) : (
             filteredTodos.map((todo) => {
@@ -444,46 +605,97 @@ export default function App() {
               const isEditing = editingId === todo._id;
 
               return (
-                <div key={todo._id} className={`group flex items-start gap-3 p-3.5 rounded-xl border transition-all ${todo.completed ? 'bg-slate-900/40 border-slate-800/50' : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'}`}>
-                  <div className="flex items-start gap-3.5 flex-1 min-w-0">
-                    <button onClick={() => handleToggleTodo(todo)} disabled={isEditing} className="mt-0.5 text-slate-500 hover:text-indigo-400">
-                      {todo.completed ? <CheckCircle2 className="w-5 h-5 text-emerald-400" /> : <Circle className="w-5 h-5" />}
-                    </button>
-                    <div className="flex flex-col gap-1 flex-1">
-                      {isEditing ? (
-                        <div className="flex flex-col gap-1.5">
-                          <input
-                            type="text" autoFocus value={editingText}
-                            onChange={(e) => setEditingText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveEdit(todo._id);
-                              if (e.key === 'Escape') setEditingId(null);
-                            }}
-                            className="bg-slate-950 border border-indigo-500/70 rounded-lg px-2.5 py-1.5 text-sm text-slate-100 focus:outline-none"
-                          />
-                        </div>
-                      ) : (
-                        <p onDoubleClick={() => !todo.completed && handleStartEdit(todo)} className={`text-sm break-words ${todo.completed ? 'line-through text-slate-500' : 'text-slate-100'}`}>
-                          {todo.text}
-                        </p>
-                      )}
-                      {formattedDate && !isEditing && (
-                        <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                          <Clock className="w-3 h-3" /> {formattedDate} {todo.updatedAt && '(edited)'}
-                        </div>
-                      )}
-                    </div>
+                <div
+                  key={todo._id}
+                  className={`flex items-start gap-3 rounded-2xl border p-4 transition-all ${
+                    todo.completed
+                      ? 'border-sky-50 bg-white/60'
+                      : 'border-sky-100 bg-white shadow-md shadow-sky-100/70 hover:border-pink-200'
+                  }`}
+                >
+                  <button
+                    onClick={() => handleToggleTodo(todo)}
+                    disabled={isEditing}
+                    aria-label={todo.completed ? 'Mark as not done' : 'Mark as done'}
+                    title={todo.completed ? 'Mark as not done' : 'Mark as done'}
+                    className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 text-sm font-extrabold transition ${
+                      todo.completed
+                        ? 'btn-grad border-transparent text-white'
+                        : 'border-sky-300 bg-white text-transparent hover:border-pink-400 hover:text-pink-300'
+                    }`}
+                  >
+                    ✓
+                  </button>
+
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        autoFocus
+                        value={editingText}
+                        onChange={(e) => setEditingText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveEdit(todo._id);
+                          if (e.key === 'Escape') setEditingId(null);
+                        }}
+                        aria-label="Edit task"
+                        className={inputClass}
+                      />
+                    ) : (
+                      <p
+                        onDoubleClick={() => !todo.completed && handleStartEdit(todo)}
+                        className={`break-words text-base leading-snug ${
+                          todo.completed ? 'text-slate-400 line-through' : 'font-semibold text-slate-800'
+                        }`}
+                      >
+                        {todo.text}
+                      </p>
+                    )}
+                    {formattedDate && !isEditing && (
+                      <div className="text-xs text-slate-400">
+                        🕒 {formattedDate} {todo.updatedAt && '· ✏️ edited'}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1">
+
+                  <div className="flex shrink-0 items-center gap-1">
                     {isEditing ? (
                       <>
-                        <button onClick={() => handleSaveEdit(todo._id)} className="p-1.5 text-emerald-400 hover:bg-emerald-500/10 rounded-lg"><Check className="w-4 h-4" /></button>
-                        <button onClick={() => setEditingId(null)} className="p-1.5 text-slate-400 hover:bg-slate-800 rounded-lg"><X className="w-4 h-4" /></button>
+                        <button
+                          onClick={() => handleSaveEdit(todo._id)}
+                          aria-label="Save"
+                          title="Save"
+                          className="flex h-9 w-9 items-center justify-center rounded-xl text-base transition hover:bg-sky-50"
+                        >
+                          💾
+                        </button>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          aria-label="Cancel"
+                          title="Cancel"
+                          className="flex h-9 w-9 items-center justify-center rounded-xl text-base transition hover:bg-slate-100"
+                        >
+                          ✖️
+                        </button>
                       </>
                     ) : (
                       <>
-                        <button onClick={() => handleStartEdit(todo)} className="p-1.5 text-slate-500 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg opacity-80 sm:opacity-0 group-hover:opacity-100"><Edit2 className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => setDeleteCandidate(todo)} className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg opacity-80 sm:opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
+                        <button
+                          onClick={() => handleStartEdit(todo)}
+                          aria-label="Edit task"
+                          title="Edit"
+                          className="flex h-9 w-9 items-center justify-center rounded-xl text-base transition hover:bg-sky-50"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={() => setDeleteCandidate(todo)}
+                          aria-label="Delete task"
+                          title="Delete"
+                          className="flex h-9 w-9 items-center justify-center rounded-xl text-base transition hover:bg-pink-50"
+                        >
+                          🗑️
+                        </button>
                       </>
                     )}
                   </div>
@@ -492,30 +704,41 @@ export default function App() {
             })
           )}
         </div>
+
+        {todos.length > 0 && (
+          <p className="pb-4 text-center text-xs text-slate-400">
+            💡 Tip: double-click a task to edit it, press Enter to save
+          </p>
+        )}
       </div>
 
-      {isSettingsOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 relative">
-            <button onClick={() => setIsSettingsOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-200"><X className="w-5 h-5" /></button>
-            <h2 className="text-lg font-semibold text-white flex items-center gap-2"><Server className="w-5 h-5 text-indigo-400" /> API Settings</h2>
-            <div className="mt-4"><input type="text" value={pendingApiUrl} onChange={(e) => setPendingApiUrl(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 font-mono" /></div>
-            <div className="mt-6 flex justify-end gap-2.5">
-              <button onClick={() => setIsSettingsOpen(false)} className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:bg-slate-800">Cancel</button>
-              <button onClick={() => { setApiUrl(pendingApiUrl); setIsSettingsOpen(false); }} className="px-4 py-2 rounded-xl text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-medium">Save</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {renderSettingsModal()}
 
+      {/* Delete confirmation */}
       {deleteCandidate && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm p-6">
-            <h3 className="font-semibold text-white mb-2">Delete Task?</h3>
-            <p className="text-xs text-slate-400 mb-5">Remove "{deleteCandidate.text}"?</p>
+        <div className={modalBackdropClass} onClick={() => setDeleteCandidate(null)}>
+          <div
+            className="w-full max-w-sm rounded-3xl border border-pink-100 bg-white p-6 shadow-2xl shadow-pink-200/60"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-2 text-4xl">🗑️</div>
+            <h3 className="text-lg font-extrabold text-slate-800">Delete this task?</h3>
+            <p className="mb-5 mt-1 break-words rounded-xl bg-pink-50 px-3 py-2 text-sm text-slate-600">
+              “{deleteCandidate.text}”
+            </p>
             <div className="flex justify-end gap-2.5">
-              <button onClick={() => setDeleteCandidate(null)} className="px-3.5 py-2 rounded-xl text-xs text-slate-400 hover:bg-slate-800">Cancel</button>
-              <button onClick={confirmDelete} className="px-4 py-2 rounded-xl text-xs bg-rose-600 hover:bg-rose-500 text-white">Delete</button>
+              <button
+                onClick={() => setDeleteCandidate(null)}
+                className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-500 transition hover:bg-slate-100"
+              >
+                Keep it
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="rounded-xl bg-rose-500 px-5 py-2.5 text-sm font-bold text-white shadow-md shadow-rose-200 transition hover:bg-rose-600 active:scale-95"
+              >
+                Delete
+              </button>
             </div>
           </div>
         </div>
